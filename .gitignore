@@ -1,0 +1,16 @@
+# ===== 密钥与本地数据库，绝不提交 =====
+.env
+*.db
+school.db
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ===== 编辑器 / 系统 =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
