@@ -26,9 +26,27 @@ python hello_api.py
 |---|---|
 | `init_db.py` | 数据库初始化脚本（题目提供，保持原样不改） |
 | `hello_api.py` | 步骤 1：验证大模型 API 连通性 |
-| `tools.py` | 工具定义：JSON Schema + 执行函数（待完成） |
-| `agent_loop.py` | Agent Loop 核心逻辑 + System Prompt（待完成） |
+| `tools.py` | 工具定义：3 个工具的 JSON Schema + 执行函数 + 分发器，内置 8 项自测 |
+| `agent_loop.py` | Agent Loop 核心逻辑 + System Prompt，支持命令行单问与交互模式 |
+| `quiz.py` | 核心概念自测题（8 选择 + 2 简答），用于检查是否真正理解协议 |
+| `run_tools.bat` / `run_quiz.bat` | 双击启动器（自动定位虚拟环境，避免双击 .py 闪退） |
 | `test_queries.py` | 5 个测试问题的运行脚本（待完成） |
+
+## 运行方式
+
+```bash
+# 工具自测（不消耗 API 额度）
+.\.venv\Scripts\python.exe tools.py
+
+# 单次提问
+.\.venv\Scripts\python.exe agent_loop.py "张老师带的班里，编程成绩前三名是谁？"
+
+# 交互模式（可连续追问，保留上下文）
+.\.venv\Scripts\python.exe agent_loop.py
+```
+
+> 注意：Windows 下请在项目根目录执行，且统一用 `.venv\Scripts\python.exe`，
+> 不要用系统 `python`（`openai` 装在虚拟环境里）。
 
 ## 数据库结构
 
