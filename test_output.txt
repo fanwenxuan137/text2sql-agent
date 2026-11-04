@@ -1,0 +1,265 @@
+Text-to-SQL Agent · 测试运行记录
+运行时间：2026-11-04 21:36:29
+运行命令：.\\.venv\\Scripts\\python.exe test_queries.py
+
+==================================================================
+测试 1/5  [简单查询]
+问题：全校有多少学生？
+==================================================================
+
+  [第 1 轮] 请求模型...
+  → 调用工具 list_tables，参数 {}
+  ← 工具返回：数据库共有 4 张表：classes, scores, students, teachers
+  [第 1 轮] 工具执行完毕，继续下一轮
+
+  [第 2 轮] 请求模型...
+  → 调用工具 describe_table，参数 {"table_name": "students"}
+  ← 工具返回：表 students 的字段结构： /   - id (INTEGER，主键) /   - name (TEXT，非空) /   - class_id (INTEGER，非空) / 外键关系： /   - class_id → classes.id
+  [第 2 轮] 工具执行完毕，继续下一轮
+
+  [第 3 轮] 请求模型...
+  → 调用工具 run_sql，参数 {"sql": "SELECT COUNT(*) AS student_count FROM students"}
+  ← 工具返回：student_count / ---------------------------------------- / 30 / （共 1 行）
+  [第 3 轮] 工具执行完毕，继续下一轮
+
+  [第 4 轮] 请求模型...
+  思考：全校共有 30 名学生。
+  [第 4 轮] 模型给出最终回答（无更多工具调用）
+
+--- 最终回答 ---
+全校共有 30 名学生。
+--- 统计 ---
+轮数：4，耗时：5.0s，预期：30
+
+==================================================================
+测试 2/5  [单表聚合]
+问题：全校数学平均分是多少？
+==================================================================
+
+  [第 1 轮] 请求模型...
+  思考：我先看一下数据库的表结构。
+  → 调用工具 list_tables，参数 {}
+  ← 工具返回：数据库共有 4 张表：classes, scores, students, teachers
+  [第 1 轮] 工具执行完毕，继续下一轮
+
+  [第 2 轮] 请求模型...
+  → 调用工具 describe_table，参数 {"table_name": "scores"}
+  ← 工具返回：表 scores 的字段结构： /   - id (INTEGER，主键) /   - student_id (INTEGER，非空) /   - subject (TEXT，非空) /   - score (REAL，非空) / 外键关系： /   - student_id → students.
+  [第 2 轮] 工具执行完毕，继续下一轮
+
+  [第 3 轮] 请求模型...
+  → 调用工具 run_sql，参数 {"sql": "SELECT subject, COUNT(*) AS cnt, ROUND(AVG(score), 2) AS avg_score FROM scores GROUP BY subject"}
+  ← 工具返回：subject | cnt | avg_score / ---------------------------------------- / 历史 | 29 | 75.66 / 数学 | 30 | 75.67 / 物理 | 30 | 73.37 / 编程 | 29 | 73.34 / 英语 | 30
+  [第 3 轮] 工具执行完毕，继续下一轮
+
+  [第 4 轮] 请求模型...
+  思考：全校数学平均分为 **75.67 分**（共 30 条数学成绩记录）。
+  [第 4 轮] 模型给出最终回答（无更多工具调用）
+
+--- 最终回答 ---
+全校数学平均分为 **75.67 分**（共 30 条数学成绩记录）。
+--- 统计 ---
+轮数：4，耗时：3.7s，预期：75.67
+
+==================================================================
+测试 3/5  [多表 JOIN（核心）]
+问题：张老师带的班里，编程成绩前三名是谁？
+==================================================================
+
+  [第 1 轮] 请求模型...
+  思考：我先查看数据库结构。
+  → 调用工具 list_tables，参数 {}
+  ← 工具返回：数据库共有 4 张表：classes, scores, students, teachers
+  [第 1 轮] 工具执行完毕，继续下一轮
+
+  [第 2 轮] 请求模型...
+  → 调用工具 describe_table，参数 {"table_name": "teachers"}
+  ← 工具返回：表 teachers 的字段结构： /   - id (INTEGER，主键) /   - name (TEXT，非空)
+  → 调用工具 describe_table，参数 {"table_name": "classes"}
+  ← 工具返回：表 classes 的字段结构： /   - id (INTEGER，主键) /   - class_name (TEXT，非空) /   - teacher_id (INTEGER，非空) / 外键关系： /   - teacher_id → teachers.id
+  → 调用工具 describe_table，参数 {"table_name": "students"}
+  ← 工具返回：表 students 的字段结构： /   - id (INTEGER，主键) /   - name (TEXT，非空) /   - class_id (INTEGER，非空) / 外键关系： /   - class_id → classes.id
+  → 调用工具 describe_table，参数 {"table_name": "scores"}
+  ← 工具返回：表 scores 的字段结构： /   - id (INTEGER，主键) /   - student_id (INTEGER，非空) /   - subject (TEXT，非空) /   - score (REAL，非空) / 外键关系： /   - student_id → students.
+  [第 2 轮] 工具执行完毕，继续下一轮
+
+  [第 3 轮] 请求模型...
+  → 调用工具 run_sql，参数 {"sql": "SELECT id, name FROM teachers WHERE name LIKE '%张%'"}
+  ← 工具返回：id | name / ---------------------------------------- / 3 | 张老师 / （共 1 行）
+  → 调用工具 run_sql，参数 {"sql": "SELECT DISTINCT subject FROM scores"}
+  ← 工具返回：subject / ---------------------------------------- / 数学 / 英语 / 物理 / 历史 / 编程 / （共 5 行）
+  [第 3 轮] 工具执行完毕，继续下一轮
+
+  [第 4 轮] 请求模型...
+  → 调用工具 run_sql，参数 {"sql": "SELECT c.id, c.class_name FROM classes c WHERE c.teacher_id = 3"}
+  ← 工具返回：id | class_name / ---------------------------------------- / 3 | 三班 / 4 | 四班 / （共 2 行）
+  [第 4 轮] 工具执行完毕，继续下一轮
+
+  [第 5 轮] 请求模型...
+  → 调用工具 run_sql，参数 {"sql": "SELECT s.name, c.class_name, sc.score FROM scores sc JOIN students s ON s.id = sc.student_id JOIN classes c ON c.id = s.class_id WHERE c.teacher_id = 3 AND sc.subject = '编程' ORDER BY sc.score DESC LIMIT 10"}
+  ← 工具返回：name | class_name | score / ---------------------------------------- / 韩八 | 三班 | 94.0 / 朱十 | 三班 | 92.0 / 吕四 | 四班 | 89.0 / 余六 | 四班 | 87.0 / 蒋六 | 三班 | 8
+  [第 5 轮] 工具执行完毕，继续下一轮
+
+  [第 6 轮] 请求模型...
+  思考：张老师带两个班（三班、四班），编程成绩前三名是：
+
+1. **韩八**（三班）— 94 分
+2. **朱十**（三班）— 92 分
+3. **吕四**（四班）— 89 分
+
+第四名是四班的余六（87 分），与第三名只差 2 分。
+  [第 6 轮] 模型给出最终回答（无更多工具调用）
+
+--- 最终回答 ---
+张老师带两个班（三班、四班），编程成绩前三名是：
+
+1. **韩八**（三班）— 94 分
+2. **朱十**（三班）— 92 分
+3. **吕四**（四班）— 89 分
+
+第四名是四班的余六（87 分），与第三名只差 2 分。
+--- 统计 ---
+轮数：6，耗时：7.1s，预期：韩八 94 / 朱十 92 / 吕四 89
+
+==================================================================
+测试 4/5  [多表聚合 + 排序]
+问题：哪个班平均成绩最高？
+==================================================================
+
+  [第 1 轮] 请求模型...
+  思考：我先查看数据库的表结构。
+  → 调用工具 list_tables，参数 {}
+  ← 工具返回：数据库共有 4 张表：classes, scores, students, teachers
+  [第 1 轮] 工具执行完毕，继续下一轮
+
+  [第 2 轮] 请求模型...
+  → 调用工具 describe_table，参数 {"table_name": "classes"}
+  ← 工具返回：表 classes 的字段结构： /   - id (INTEGER，主键) /   - class_name (TEXT，非空) /   - teacher_id (INTEGER，非空) / 外键关系： /   - teacher_id → teachers.id
+  → 调用工具 describe_table，参数 {"table_name": "scores"}
+  ← 工具返回：表 scores 的字段结构： /   - id (INTEGER，主键) /   - student_id (INTEGER，非空) /   - subject (TEXT，非空) /   - score (REAL，非空) / 外键关系： /   - student_id → students.
+  → 调用工具 describe_table，参数 {"table_name": "students"}
+  ← 工具返回：表 students 的字段结构： /   - id (INTEGER，主键) /   - name (TEXT，非空) /   - class_id (INTEGER，非空) / 外键关系： /   - class_id → classes.id
+  [第 2 轮] 工具执行完毕，继续下一轮
+
+  [第 3 轮] 请求模型...
+  → 调用工具 run_sql，参数 {"sql": "SELECT c.class_name, ROUND(AVG(s.score), 2) AS avg_score, COUNT(s.id) AS cnt\nFROM scores s\nJOIN students st ON s.student_id = st.id\nJOIN classes c ON st.class_id = c.id\nGROUP BY c.id\nORDER BY avg_score DESC"}
+  ← 工具返回：class_name | avg_score | cnt / ---------------------------------------- / 一班 | 78.26 | 34 / 三班 | 78.2 | 30 / 四班 | 74.8 | 30 / 二班 | 73.12 | 34 / 五班 | 6
+  [第 3 轮] 工具执行完毕，继续下一轮
+
+  [第 4 轮] 请求模型...
+  思考：**一班**平均成绩最高，为 **78.26 分**（基于 34 条成绩记录）。
+
+各班排名：一班 78.26 > 三班 78.20 > 四班 74.80 > 二班 73.12 > 五班 65.05。一班与三班差距很小，仅 0.06 分。
+  [第 4 轮] 模型给出最终回答（无更多工具调用）
+
+--- 最终回答 ---
+**一班**平均成绩最高，为 **78.26 分**（基于 34 条成绩记录）。
+
+各班排名：一班 78.26 > 三班 78.20 > 四班 74.80 > 二班 73.12 > 五班 65.05。一班与三班差距很小，仅 0.06 分。
+--- 统计 ---
+轮数：4，耗时：4.0s，预期：一班
+
+==================================================================
+测试 5/5  [数据探索]
+问题：有没有缺考的学生？
+==================================================================
+
+  [第 1 轮] 请求模型...
+  思考：我先看一下数据库里有哪些表。
+  → 调用工具 list_tables，参数 {}
+  ← 工具返回：数据库共有 4 张表：classes, scores, students, teachers
+  [第 1 轮] 工具执行完毕，继续下一轮
+
+  [第 2 轮] 请求模型...
+  → 调用工具 describe_table，参数 {"table_name": "scores"}
+  ← 工具返回：表 scores 的字段结构： /   - id (INTEGER，主键) /   - student_id (INTEGER，非空) /   - subject (TEXT，非空) /   - score (REAL，非空) / 外键关系： /   - student_id → students.
+  → 调用工具 describe_table，参数 {"table_name": "students"}
+  ← 工具返回：表 students 的字段结构： /   - id (INTEGER，主键) /   - name (TEXT，非空) /   - class_id (INTEGER，非空) / 外键关系： /   - class_id → classes.id
+  [第 2 轮] 工具执行完毕，继续下一轮
+
+  [第 3 轮] 请求模型...
+  → 调用工具 run_sql，参数 {"sql": "SELECT COUNT(*) AS total_scores, SUM(CASE WHEN score IS NULL THEN 1 ELSE 0 END) AS null_scores, MIN(score) AS min_score, MAX(score) AS max_score FROM scores"}
+  ← 工具返回：total_scores | null_scores | min_score | max_score / ---------------------------------------- / 148 | 0 | 35.0 | 100.0 / （共 1 行）
+  → 调用工具 run_sql，参数 {"sql": "SELECT s.id, s.name, c.name AS class_name, COUNT(sc.id) AS subject_count FROM students s LEFT JOIN classes c ON s.class_id = c.id LEFT JOIN scores sc ON sc.student_id = s.id GROUP BY s.id ORDER BY subject_count ASC LIMIT 50"}
+  ← 工具返回：SQL 执行错误：no such column: c.name / 请检查表名、字段名和语法后重试。
+  [第 3 轮] 工具执行完毕，继续下一轮
+
+  [第 4 轮] 请求模型...
+  → 调用工具 describe_table，参数 {"table_name": "classes"}
+  ← 工具返回：表 classes 的字段结构： /   - id (INTEGER，主键) /   - class_name (TEXT，非空) /   - teacher_id (INTEGER，非空) / 外键关系： /   - teacher_id → teachers.id
+  [第 4 轮] 工具执行完毕，继续下一轮
+
+  [第 5 轮] 请求模型...
+  → 调用工具 run_sql，参数 {"sql": "SELECT s.id, s.name, c.class_name, COUNT(sc.id) AS subject_count FROM students s LEFT JOIN classes c ON s.class_id = c.id LEFT JOIN scores sc ON sc.student_id = s.id GROUP BY s.id ORDER BY subject_count ASC LIMIT 50"}
+  ← 工具返回：id | name | class_name | subject_count / ---------------------------------------- / 7 | 王明 | 一班 | 4 / 14 | 卫五 | 二班 | 4 / 1 | 张三 | 一班 | 5 / 2 | 李四 | 一班
+  → 调用工具 run_sql，参数 {"sql": "SELECT subject, COUNT(*) AS cnt FROM scores GROUP BY subject"}
+  ← 工具返回：subject | cnt / ---------------------------------------- / 历史 | 29 / 数学 | 30 / 物理 | 30 / 编程 | 29 / 英语 | 30 / （共 5 行）
+  [第 5 轮] 工具执行完毕，继续下一轮
+
+  [第 6 轮] 请求模型...
+  → 调用工具 run_sql，参数 {"sql": "SELECT s.name, c.class_name, sub.subject FROM students s CROSS JOIN (SELECT DISTINCT subject FROM scores) sub LEFT JOIN scores sc ON sc.student_id = s.id AND sc.subject = sub.subject LEFT JOIN classes c ON s.class_id = c.id WHERE sc.id IS NULL"}
+  ← 工具返回：name | class_name | subject / ---------------------------------------- / 王明 | 一班 | 编程 / 卫五 | 二班 | 历史 / （共 2 行）
+  [第 6 轮] 工具执行完毕，继续下一轮
+
+  [第 7 轮] 请求模型...
+  思考：有，共 2 名学生存在缺考记录：
+
+- **王明**（一班）——缺考 **编程**
+- **卫五**（二班）——缺考 **历史**
+
+其余 28 名学生五门科目（数学、英语、物理、历史、编程）成绩齐全。数据库中成绩字段没有空值，缺考是以“该科目没有成绩记录”的形式体现的。
+  [第 7 轮] 模型给出最终回答（无更多工具调用）
+
+--- 最终回答 ---
+有，共 2 名学生存在缺考记录：
+
+- **王明**（一班）——缺考 **编程**
+- **卫五**（二班）——缺考 **历史**
+
+其余 28 名学生五门科目（数学、英语、物理、历史、编程）成绩齐全。数据库中成绩字段没有空值，缺考是以“该科目没有成绩记录”的形式体现的。
+--- 统计 ---
+轮数：7，耗时：8.6s，预期：王明、卫五
+
+
+==================================================================
+  汇总表
+==================================================================
+
+#  类型                轮数    耗时      预期                      
+------------------------------------------------------------------
+1  简单查询            4     5.0     30
+2  单表聚合            4     3.7     75.67
+3  多表 JOIN（核心）     6     7.1     韩八 94 / 朱十 92 / 吕四 89
+4  多表聚合 + 排序       4     4.0     一班
+5  数据探索            7     8.6     王明、卫五
+------------------------------------------------------------------
+
+完整回答：
+
+[1] 全校有多少学生？
+    全校共有 30 名学生。
+
+[2] 全校数学平均分是多少？
+    全校数学平均分为 **75.67 分**（共 30 条数学成绩记录）。
+
+[3] 张老师带的班里，编程成绩前三名是谁？
+    张老师带两个班（三班、四班），编程成绩前三名是：
+
+1. **韩八**（三班）— 94 分
+2. **朱十**（三班）— 92 分
+3. **吕四**（四班）— 89 分
+
+第四名是四班的余六（87 分），与第三名只差 2 分。
+
+[4] 哪个班平均成绩最高？
+    **一班**平均成绩最高，为 **78.26 分**（基于 34 条成绩记录）。
+
+各班排名：一班 78.26 > 三班 78.20 > 四班 74.80 > 二班 73.12 > 五班 65.05。一班与三班差距很小，仅 0.06 分。
+
+[5] 有没有缺考的学生？
+    有，共 2 名学生存在缺考记录：
+
+- **王明**（一班）——缺考 **编程**
+- **卫五**（二班）——缺考 **历史**
+
+其余 28 名学生五门科目（数学、英语、物理、历史、编程）成绩齐全。数据库中成绩字段没有空值，缺考是以“该科目没有成绩记录”的形式体现的。
