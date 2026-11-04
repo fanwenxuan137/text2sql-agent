@@ -22,6 +22,7 @@ tools.py — 给大模型用的三种「工具」
 """
 
 import json
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -122,6 +123,101 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def _connect_readonly() -> sqlite3.Connection:
+    """
+    以「只读模式」打开数据库，并挂上授权回调。
+
+    mode=ro：SQLite 层面直接拒绝写入，即使 SQL 绕过了前面的检查也改不了数据。
+    set_authorizer：引擎每次要执行某类操作时先问这个函数，返回 DENY 就直接失败。
+    """
+    # URI 形式才能带参数；as_posix() 把反斜杠换成斜杠，避免 Windows 路径解析出错
+    uri = f"file:{DB_PATH.as_posix()}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    conn.row_factory = sqlite3.Row
+    conn.set_authorizer(_readonly_authorizer)
+    return conn
+
+
+# 只允许这几类操作通过：查询、读表、调用函数、递归查询
+_ALLOWED_ACTIONS = {
+    sqlite3.SQLITE_SELECT,     # SELECT 语句
+    sqlite3.SQLITE_READ,       # 读某个表/字段
+    sqlite3.SQLITE_FUNCTION,   # 调用函数，如 COUNT / AVG / ROUND
+    sqlite3.SQLITE_RECURSIVE,  # WITH RECURSIVE
+}
+
+
+def _readonly_authorizer(action, arg1, arg2, db_name, trigger_name):
+    """
+    SQLite 授权回调：每个操作执行前都会被调用一次。
+    返回 SQLITE_OK 放行，SQLITE_DENY 拒绝（拒绝后 sqlite3 会抛 DatabaseError）。
+    """
+    return sqlite3.SQLITE_OK if action in _ALLOWED_ACTIONS else sqlite3.SQLITE_DENY
+
+
+# ---- 第 1 层：SQL 白名单校验 ----
+
+# 只要出现这些关键字就直接拒绝（INSERT/UPDATE/DELETE/DDL 等写操作与结构变更）
+_FORBIDDEN_KEYWORDS = (
+    "insert", "update", "delete", "replace",
+    "drop", "alter", "create", "truncate",
+    "attach", "detach", "pragma", "vacuum", "reindex",
+    "trigger", "begin", "commit", "rollback",
+)
+
+_RE_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)      # /* ... */
+_RE_LINE_COMMENT = re.compile(r"--[^\n]*")              # -- ...
+_RE_SINGLE_QUOTE = re.compile(r"'(?:[^']|'')*'")        # '字符串'
+_RE_DOUBLE_QUOTE = re.compile(r'"(?:[^"]|"")*"')        # "标识符"
+
+
+def _strip_noise(sql: str) -> str:
+    """
+    去掉注释和字符串字面量，再做关键字检查。
+
+    为什么必须去掉字符串？否则 `WHERE subject = 'drop'` 会被误判成危险语句。
+    （这个库的科目名里没有这类词，但真实业务数据里很常见）
+    """
+    s = _RE_BLOCK_COMMENT.sub(" ", sql)
+    s = _RE_LINE_COMMENT.sub(" ", s)
+    s = _RE_SINGLE_QUOTE.sub("''", s)
+    s = _RE_DOUBLE_QUOTE.sub('""', s)
+    return s
+
+
+def validate_sql(sql: str) -> str | None:
+    """
+    检查 SQL 是否安全。安全返回 None，不安全返回「给模型看的错误说明」。
+
+    返回错误说明而不是抛异常，是因为模型要读懂原因才知道怎么改。
+    """
+    if not sql or not sql.strip():
+        return "错误：SQL 为空。"
+
+    cleaned = sql.strip().rstrip(";").strip()
+    if not cleaned:
+        return "错误：SQL 为空。"
+
+    # 去噪后再判断，防止注释和字符串干扰
+    probe = _strip_noise(cleaned).strip()
+
+    # 1) 必须以 SELECT 或 WITH（CTE）开头
+    lowered = probe.lower()
+    if not (lowered.startswith("select") or lowered.startswith("with")):
+        return "错误：只允许执行 SELECT 查询，该语句已被拒绝。"
+
+    # 2) 只允许单条语句（去噪后还剩分号，说明想拼接多条）
+    if ";" in probe:
+        return "错误：一次只能执行一条语句，检测到多条语句，已拒绝。"
+
+    # 3) 关键字黑名单，\b 保证是完整单词（避免 selected 误伤 select）
+    for kw in _FORBIDDEN_KEYWORDS:
+        if re.search(rf"\b{kw}\b", lowered):
+            return f"错误：语句中包含被禁止的关键字 {kw.upper()}，只允许纯查询操作。"
+
+    return None
+
+
 def list_tables() -> str:
     """列出所有表名。"""
     conn = _connect()
@@ -169,19 +265,27 @@ def describe_table(table_name: str) -> str:
 
 
 def run_sql(sql: str) -> str:
-    """执行 SELECT，返回结果文本。"""
-    # ---- 第一道安全闸：只允许 SELECT ----
-    # 现在写得比较朴素，进阶部分会做得更严（多语句、注释绕过等）
-    cleaned = sql.strip().rstrip(";").strip()
-    lowered = cleaned.lower()
-    if not lowered.startswith("select") and not lowered.startswith("with"):
-        return "错误：只允许执行 SELECT 查询，该语句已被拒绝。"
+    """
+    执行 SELECT，返回结果文本。
 
-    if ";" in cleaned:
-        return "错误：一次只能执行一条语句，检测到多条语句，已拒绝。"
+    安全防护一共三层，任何一层拦下都会把原因返回给模型（而不是直接崩）：
+        第 1 层 validate_sql     —— 语法白名单，拦明显违规 + 给出人能看懂的理由
+        第 2 层 authorizer       —— SQLite 引擎级，只放行读操作
+        第 3 层 mode=ro 只读连接 —— 物理上写不进去，最坏情况也改不了数据
 
-    conn = _connect()
+    为什么需要三层？因为只靠字符串判断容易被绕过（注释、拼接、大小写混写），
+    只靠引擎限制又给不出友好提示，模型不知道该改什么。
+    先给提示、再上硬限制、最后物理兜底。
+    """
+    # ---- 第 1 层：语法白名单 ----
+    problem = validate_sql(sql)
+    if problem:
+        return problem
+
+    # ---- 第 2、3 层：只读连接 + 授权回调 ----
+    conn = _connect_readonly()
     try:
+        cleaned = sql.strip().rstrip(";").strip()
         cursor = conn.execute(cleaned)
         rows = cursor.fetchmany(MAX_ROWS)
         columns = [d[0] for d in cursor.description] if cursor.description else []
@@ -291,6 +395,46 @@ if __name__ == "__main__":
 
     print("\n[8] 分发器：非法 JSON")
     print(execute_tool("run_sql", "{sql: bad json}"))
+
+    # ---- 进阶：安全防护的四类绕过尝试 ----
+    print("\n" + "-" * 60)
+    print("安全防护测试（四类典型绕过手段）")
+    print("-" * 60)
+
+    print("\n[9] 多语句拼接：SELECT 后面藏 DROP")
+    print(run_sql("SELECT 1; DROP TABLE students"))
+
+    print("\n[10] 注释绕过：前面加行注释")
+    print(run_sql("-- 无害的注释\nDROP TABLE students"))
+
+    print("\n[11] 块注释绕过 + 大小写混写")
+    print(run_sql("/*x*/ DeLeTe FROM students"))
+
+    print("\n[12] PRAGMA 尝试（会修改数据库设置的语句）")
+    print(run_sql("PRAGMA writable_schema=ON"))
+
+    print("\n[13] 反向验证：字符串字面量里的 'drop' 不应被误伤")
+    print(run_sql("SELECT 'drop' AS 词, COUNT(*) AS 人数 FROM students"))
+
+    print("\n[14] 反向验证：正常 JOIN / 聚合 / 子查询仍然可用")
+    print(run_sql("""
+        SELECT name FROM students
+        WHERE id IN (SELECT student_id FROM scores WHERE score >= 95)
+        LIMIT 3
+    """))
+
+    print("\n[15] 确认数据没被改动（学生数应仍为 30）")
+    print(run_sql("SELECT COUNT(*) AS 学生数 FROM students"))
+
+    print("\n[16] 验证第 2、3 层：绕过第 1 层直接对只读连接执行 UPDATE")
+    conn = _connect_readonly()
+    try:
+        conn.execute("UPDATE students SET name='hacked' WHERE id=1")
+        print("没被拦住（异常！安全防护失效）")
+    except sqlite3.Error as e:
+        print(f"被引擎拦下：{type(e).__name__}: {e}")
+    finally:
+        conn.close()
 
     print("\n" + "=" * 60)
     print("自测结束。全部符合预期 → 可以进入 agent_loop.py")
