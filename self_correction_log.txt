@@ -1,0 +1,86 @@
+================================================================
+  Self-Correction 演示：模型写错 SQL 后能否自己修好
+================================================================
+
+问题：各班英语平均分从高到低排序，列出班级名和平均分
+
+----------------------------------------------------------------
+
+  [第 1 轮] 请求模型...
+  思考：我先查看数据库的表结构。
+  → 调用工具 list_tables，参数 {}
+  ← 工具返回：数据库共有 4 张表：classes, scores, students, teachers
+  [第 1 轮] 工具执行完毕，继续下一轮
+
+  [第 2 轮] 请求模型...
+  → 调用工具 describe_table，参数 {"table_name": "classes"}
+  ← 工具返回：表 classes 的字段结构： /   - id (INTEGER，主键) /   - class_name (TEXT，非空) /   - teacher_id (INTEGER，非空) / 外键关系： /   - teacher_id → teachers.id
+  → 调用工具 describe_table，参数 {"table_name": "scores"}
+  ← 工具返回：表 scores 的字段结构： /   - id (INTEGER，主键) /   - student_id (INTEGER，非空) /   - subject (TEXT，非空) /   - score (REAL，非空) / 外键关系： /   - student_id → students.
+  → 调用工具 describe_table，参数 {"table_name": "students"}
+  ← 工具返回：表 students 的字段结构： /   - id (INTEGER，主键) /   - name (TEXT，非空) /   - class_id (INTEGER，非空) / 外键关系： /   - class_id → classes.id
+  [第 2 轮] 工具执行完毕，继续下一轮
+
+  [第 3 轮] 请求模型...
+  → 调用工具 run_sql，参数 {"sql": "SELECT c.class_name, ROUND(AVG(s.score), 2) AS avg_score, COUNT(*) AS cnt\nFROM scores s\nJOIN students st ON st.id = s.student_id\nJOIN classes c ON c.id = st.class_id\nWHERE s.subject = '英语'\nGROUP BY c.id, c.class_name\nORDER BY avg_score DESC"}
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! 演示注入：故意把模型这条 SQL 改错（模拟模型写错字段名）
+!! 改后：SELECT c.class_name, ROUND(AVG(s.score_value), 2) AS avg_score, COUNT(*) AS cnt
+FROM scores s
+JOIN students st ON st.id = s.student_id
+JOIN classes c ON c.id = st.class_id
+WHERE s.subject = '英语'
+GROUP BY c.id, c.class_name
+ORDER BY avg_score DESC
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! 模型即将读到：SQL 执行错误：no such column: s.score_value
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  ← 工具返回：SQL 执行错误：no such column: s.score_value / 请检查表名、字段名和语法后重试。
+  [第 3 轮] 工具执行完毕，继续下一轮
+
+  [第 4 轮] 请求模型...
+  思考：错误信息提示的列名与我写的不同，我重新确认字段名。
+  → 调用工具 run_sql，参数 {"sql": "SELECT * FROM scores LIMIT 3"}
+  ← 工具返回：id | student_id | subject | score / ---------------------------------------- / 1 | 1 | 数学 | 99.0 / 2 | 1 | 英语 | 88.0 / 3 | 1 | 物理 | 82.0 / （共 3 行）
+  [第 4 轮] 工具执行完毕，继续下一轮
+
+  [第 5 轮] 请求模型...
+  思考：字段名确实是 score，我重新执行查询。
+  → 调用工具 run_sql，参数 {"sql": "SELECT c.class_name, ROUND(AVG(s.score), 2) AS avg_score, COUNT(*) AS cnt\nFROM scores s\nJOIN students st ON st.id = s.student_id\nJOIN classes c ON c.id = st.class_id\nWHERE s.subject = '英语'\nGROUP BY c.id, c.class_name\nORDER BY avg_score DESC"}
+  ← 工具返回：class_name | avg_score | cnt / ---------------------------------------- / 三班 | 80.5 | 6 / 一班 | 80.14 | 7 / 四班 | 75.0 | 6 / 二班 | 70.43 | 7 / 五班 | 64.75
+  [第 5 轮] 工具执行完毕，继续下一轮
+
+  [第 6 轮] 请求模型...
+  思考：各班英语平均分从高到低：
+
+| 排名 | 班级 | 英语平均分 | 参考人数 |
+|---|---|---|---|
+| 1 | 三班 | 80.50 | 6 |
+| 2 | 一班 | 80.14 | 7 |
+| 3 | 四班 | 75.00 | 6 |
+| 4 | 二班 | 70.43 | 7 |
+| 5 | 五班 | 64.75 | 4 |
+
+三班和一班几乎持平（相差 0.36 分），五班明显偏低。
+  [第 6 轮] 模型给出最终回答（无更多工具调用）
+
+================================================================
+最终回答：各班英语平均分从高到低：
+
+| 排名 | 班级 | 英语平均分 | 参考人数 |
+|---|---|---|---|
+| 1 | 三班 | 80.50 | 6 |
+| 2 | 一班 | 80.14 | 7 |
+| 3 | 四班 | 75.00 | 6 |
+| 4 | 二班 | 70.43 | 7 |
+| 5 | 五班 | 64.75 | 4 |
+
+三班和一班几乎持平（相差 0.36 分），五班明显偏低。
+================================================================
+
+【演示结论】
+  · 是否出现了错误反馈：是
+  · 模型是否重试了 run_sql：是（重试 3 次）
+  · 结论：模型读到错误信息后自己改了 SQL 并成功重试 —— Self-Correction 成立
