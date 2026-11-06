@@ -1,2 +1,4 @@
-openai>=1.0.0
-python-dotenv>=1.0.0
+# 依赖清单（刻意留了上界，避免未来大版本变更导致跑不起来）
+# 实测通过：openai 3.46.0 / python-dotenv 1.2.4（Python 3.13）
+openai>=1.0,<4
+python-dotenv>=1.0,<2
